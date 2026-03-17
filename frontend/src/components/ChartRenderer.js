@@ -14,6 +14,11 @@ function ChartRenderer({ config, data }) {
 
   const { type, xAxis, yAxis, nameKey, dataKey } = config;
 
+  // If chart type is "none", don't render anything
+  if (type === "none") {
+    return null;
+  }
+
   const renderBarChart = () => (
     <ResponsiveContainer width="100%" height={400}>
       <BarChart data={data}>

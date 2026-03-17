@@ -12,7 +12,7 @@ import numpy as np
 AUTH_DB_PATH = "auth_users.db"
 
 def init_auth_database():
-    """Initialize authentication database with users table"""
+    """Initialize authentication database with users and face encodings tables"""
     conn = sqlite3.connect(AUTH_DB_PATH)
     cursor = conn.cursor()
     
@@ -22,15 +22,28 @@ def init_auth_database():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             employee_id TEXT UNIQUE NOT NULL,
             company_unique_id TEXT NOT NULL,
-            face_encoding TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
     
-    # Create index for faster lookups
+    # Create face_encodings table to store multiple encodings per user
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS face_encodings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            face_encoding TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    """)
+    
+    # Create indexes for faster lookups
     cursor.execute("""
         CREATE INDEX IF NOT EXISTS idx_employee_id ON users(employee_id)
+    """)
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_user_id ON face_encodings(user_id)
     """)
     
     conn.commit()
@@ -55,21 +68,40 @@ def register_user(employee_id: str, company_unique_id: str, face_encoding: List[
         
         # Check if employee already exists
         cursor.execute("SELECT id FROM users WHERE employee_id = ?", (employee_id,))
-        if cursor.fetchone():
+        existing_user = cursor.fetchone()
+        
+        if existing_user:
+            user_id = existing_user[0]
+            # Add additional face encoding for existing user
+            encoding_json = json.dumps(face_encoding)
+            cursor.execute("""
+                INSERT INTO face_encodings (user_id, face_encoding)
+                VALUES (?, ?)
+            """, (user_id, encoding_json))
+            conn.commit()
             conn.close()
-            return {"success": False, "error": "Employee ID already registered"}
+            return {
+                "success": True,
+                "message": "Additional face encoding registered successfully",
+                "user_id": user_id
+            }
         
-        # Convert face encoding to JSON string for storage
-        encoding_json = json.dumps(face_encoding)
-        
-        # Insert new user
+        # Create new user
         cursor.execute("""
-            INSERT INTO users (employee_id, company_unique_id, face_encoding)
-            VALUES (?, ?, ?)
-        """, (employee_id, company_unique_id, encoding_json))
+            INSERT INTO users (employee_id, company_unique_id)
+            VALUES (?, ?)
+        """, (employee_id, company_unique_id))
+        
+        user_id = cursor.lastrowid
+        
+        # Add first face encoding
+        encoding_json = json.dumps(face_encoding)
+        cursor.execute("""
+            INSERT INTO face_encodings (user_id, face_encoding)
+            VALUES (?, ?)
+        """, (user_id, encoding_json))
         
         conn.commit()
-        user_id = cursor.lastrowid
         conn.close()
         
         return {
@@ -83,35 +115,46 @@ def register_user(employee_id: str, company_unique_id: str, face_encoding: List[
 
 def get_user_by_employee_id(employee_id: str) -> Optional[Dict]:
     """
-    Retrieve user and face encoding by employee ID
+    Retrieve user and all face encodings by employee ID
     
     Args:
         employee_id: Employee identifier
     
     Returns:
-        User dict with face encoding or None
+        User dict with list of face encodings or None
     """
     try:
         conn = sqlite3.connect(AUTH_DB_PATH)
         cursor = conn.cursor()
         
         cursor.execute("""
-            SELECT id, employee_id, company_unique_id, face_encoding, created_at
+            SELECT id, employee_id, company_unique_id, created_at
             FROM users WHERE employee_id = ?
         """, (employee_id,))
         
         row = cursor.fetchone()
-        conn.close()
-        
         if not row:
+            conn.close()
             return None
         
+        user_id = row[0]
+        
+        # Get all face encodings for this user
+        cursor.execute("""
+            SELECT face_encoding FROM face_encodings
+            WHERE user_id = ?
+            ORDER BY created_at ASC
+        """, (user_id,))
+        
+        encodings = [json.loads(enc[0]) for enc in cursor.fetchall()]
+        conn.close()
+        
         return {
-            "id": row[0],
+            "id": user_id,
             "employee_id": row[1],
             "company_unique_id": row[2],
-            "face_encoding": json.loads(row[3]),
-            "created_at": row[4]
+            "face_encodings": encodings,
+            "created_at": row[3]
         }
     
     except Exception as e:
@@ -120,7 +163,7 @@ def get_user_by_employee_id(employee_id: str) -> Optional[Dict]:
 
 def get_all_users() -> List[Dict]:
     """
-    Retrieve all registered users
+    Retrieve all registered users with their face encodings
     
     Returns:
         List of user dicts with face encodings
@@ -130,23 +173,34 @@ def get_all_users() -> List[Dict]:
         cursor = conn.cursor()
         
         cursor.execute("""
-            SELECT id, employee_id, company_unique_id, face_encoding, created_at
+            SELECT id, employee_id, company_unique_id, created_at
             FROM users
         """)
         
         rows = cursor.fetchall()
-        conn.close()
         
         users = []
         for row in rows:
+            user_id = row[0]
+            
+            # Get all face encodings for this user
+            cursor.execute("""
+                SELECT face_encoding FROM face_encodings
+                WHERE user_id = ?
+                ORDER BY created_at ASC
+            """, (user_id,))
+            
+            encodings = [json.loads(enc[0]) for enc in cursor.fetchall()]
+            
             users.append({
-                "id": row[0],
+                "id": user_id,
                 "employee_id": row[1],
                 "company_unique_id": row[2],
-                "face_encoding": json.loads(row[3]),
-                "created_at": row[4]
+                "face_encodings": encodings,
+                "created_at": row[3]
             })
         
+        conn.close()
         return users
     
     except Exception as e:

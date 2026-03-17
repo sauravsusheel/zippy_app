@@ -131,45 +131,41 @@ def execute_query(sql_query: str):
         return {"success": False, "error": str(e)}
 
 def get_schema():
-    """Get database schema for LLM context"""
-    schema = """
-    Database Schema:
-    
-    Table: regions
-    - region_id (INTEGER, PRIMARY KEY)
-    - region_name (TEXT)
-    
-    Table: products
-    - product_id (INTEGER, PRIMARY KEY)
-    - product_name (TEXT)
-    - category (TEXT)
-    - price (REAL)
-    
-    Table: sales
-    - sale_id (INTEGER, PRIMARY KEY)
-    - product_id (INTEGER, FOREIGN KEY)
-    - region_id (INTEGER, FOREIGN KEY)
-    - sale_date (DATE)
-    - quantity (INTEGER)
-    - revenue (REAL)
-    """
-    return schema
-
-def get_table_schema(table_name: str) -> Dict:
-    """Get schema information for a table"""
+    """Get database schema for LLM context — dynamically reads all tables"""
     try:
         conn = sqlite3.connect(DATABASE_PATH)
         cursor = conn.cursor()
-        
+
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = [row[0] for row in cursor.fetchall()]
+
+        schema_parts = []
+        for table in tables:
+            cursor.execute(f"PRAGMA table_info({table})")
+            cols = cursor.fetchall()
+            col_defs = ", ".join(f"{col[1]} ({col[2]})" for col in cols)
+            schema_parts.append(f"Table: {table}\nColumns: {col_defs}")
+
+        conn.close()
+        return "\n\n".join(schema_parts)
+    except Exception as e:
+        return f"Schema unavailable: {str(e)}"
+
+def get_table_schema(table_name: str) -> Dict:
+    """Get schema information for a table, including sample values for LLM context"""
+    try:
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+
         # Get column information
         cursor.execute(f"PRAGMA table_info({table_name})")
         columns = cursor.fetchall()
-        
+
         schema = {
             "table_name": table_name,
             "columns": []
         }
-        
+
         for col in columns:
             schema["columns"].append({
                 "name": col[1],
@@ -178,7 +174,13 @@ def get_table_schema(table_name: str) -> Dict:
                 "default": col[4],
                 "pk": col[5]
             })
-        
+
+        # Fetch a few sample rows so LLM can understand actual values
+        cursor.execute(f"SELECT * FROM {table_name} LIMIT 3")
+        rows = cursor.fetchall()
+        col_names = [col[1] for col in columns]
+        schema["sample_rows"] = [dict(zip(col_names, row)) for row in rows]
+
         conn.close()
         return schema
     except Exception as e:

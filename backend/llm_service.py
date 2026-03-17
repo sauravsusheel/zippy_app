@@ -23,45 +23,24 @@ query_cache = {}
 last_api_call = 0
 MIN_API_CALL_INTERVAL = 2  # Minimum 2 seconds between API calls
 
-# Common SQL patterns to avoid API calls
-COMMON_PATTERNS = {
-    "total": "SELECT SUM({numeric_col}) as total FROM {table}",
-    "average": "SELECT AVG({numeric_col}) as average FROM {table}",
-    "count": "SELECT COUNT(*) as count FROM {table}",
-    "max": "SELECT MAX({numeric_col}) as maximum FROM {table}",
-    "min": "SELECT MIN({numeric_col}) as minimum FROM {table}",
-    "top": "SELECT {col}, COUNT(*) as count FROM {table} GROUP BY {col} ORDER BY count DESC LIMIT 10",
-    "by": "SELECT {group_col}, SUM({numeric_col}) as total FROM {table} GROUP BY {group_col}",
-}
-
 def _get_cache_key(query: str, table_name: str) -> str:
     """Generate cache key for a query"""
     key_str = f"{query}:{table_name}".lower()
     return hashlib.md5(key_str.encode()).hexdigest()
 
 def _try_pattern_match(user_query: str, table_name: str) -> Optional[str]:
-    """Try to match query to common patterns without API call"""
+    """
+    Lightweight pattern match for very simple queries only.
+    Avoids hardcoded column names — those are handled by the LLM with schema context.
+    """
     query_lower = user_query.lower()
-    
-    # Pattern matching for common queries
-    if "total" in query_lower and ("sum" in query_lower or "revenue" in query_lower or "sales" in query_lower):
-        return f"SELECT SUM(revenue) as total FROM {table_name}"
-    
-    if "average" in query_lower or "avg" in query_lower:
-        return f"SELECT AVG(revenue) as average FROM {table_name}"
-    
-    if "count" in query_lower or "how many" in query_lower:
-        return f"SELECT COUNT(*) as count FROM {table_name}"
-    
-    if "top" in query_lower or "highest" in query_lower or "best" in query_lower:
-        return f"SELECT * FROM {table_name} ORDER BY revenue DESC LIMIT 10"
-    
-    if "lowest" in query_lower or "worst" in query_lower:
-        return f"SELECT * FROM {table_name} ORDER BY revenue ASC LIMIT 10"
-    
-    if "by region" in query_lower or "by category" in query_lower or "by product" in query_lower:
-        return f"SELECT * FROM {table_name} LIMIT 100"
-    
+
+    # Only match the most generic, schema-agnostic patterns
+    if ("count" in query_lower or "how many" in query_lower) and not any(
+        w in query_lower for w in ["by", "group", "category", "product", "per"]
+    ):
+        return f"SELECT COUNT(*) as total_count FROM {table_name}"
+
     return None
 
 def initialize_llm() -> Dict[str, Any]:
@@ -145,23 +124,30 @@ def generate_sql(user_query: str, schema_info: str, table_name: str) -> Dict[str
             time.sleep(wait_time)
         
         # Create schema context
-        schema_context = f"Database schema:\n{schema_info}\n\nFocus on table: {table_name}"
+        schema_context = schema_info
         
-        prompt = f"""You are a SQL expert. Convert the following natural language question into a SQL query.
+        prompt = f"""You are a SQL expert working with a SQLite database. Convert the user's question into a precise SQL query.
 
-Database Schema:
 {schema_context}
 
-Question: {user_query}
+User Question: {user_query}
 
-Generate ONLY the SQL query without any explanation. The query should be valid SQL that can be executed directly.
-Return only the SQL query, nothing else."""
+Rules:
+- Return ONLY the raw SQL query — no markdown, no backticks, no explanation
+- Use ONLY the exact column names listed in the schema above
+- The query must directly and completely answer the user's question
+- Use GROUP BY + COUNT/SUM/AVG for aggregation questions (e.g. "most used", "total by", "average per")
+- Use ORDER BY ... DESC LIMIT 10 for "top", "best", "highest", "most" questions
+- Use ORDER BY ... ASC LIMIT 10 for "lowest", "worst", "least" questions
+- Use GROUP BY date_column for trend/over-time questions
+- Never generate SELECT 1 or placeholder queries
+- If unsure about a column name, pick the closest match from the schema"""
 
         try:
             print(f"🔄 Calling Gemini API for SQL generation...")
             last_api_call = time.time()
             
-            model = genai.GenerativeModel("gemini-2.0-flash")
+            model = genai.GenerativeModel("gemini-2.5-flash")
             response = model.generate_content(prompt)
             
             if response and response.text:
@@ -217,8 +203,7 @@ Return only the SQL query, nothing else."""
 
 def generate_insights(user_query: str, query_result: list) -> Optional[str]:
     """
-    Generate business insights from query results
-    DISABLED by default to save API quota
+    Generate natural language business insights from query results
     
     Args:
         user_query: Original user query
@@ -227,53 +212,49 @@ def generate_insights(user_query: str, query_result: list) -> Optional[str]:
     Returns:
         Generated insights or None
     """
-    # Insights generation is disabled to minimize API calls
-    # Uncomment below to enable (uses API quota)
+    try:
+        if not GEMINI_API_KEY or not query_result:
+            return None
+        
+        # Check cache first
+        cache_key = _get_cache_key(f"insights:{user_query}", "insights")
+        if cache_key in query_cache:
+            return query_cache[cache_key]
+        
+        # Convert results to formatted string (limit to first 20 rows)
+        result_text = json.dumps(query_result[:20], indent=2, default=str)
+        
+        prompt = f"""You are a business analyst. Analyze the following data and provide a natural language response to the user's question.
+
+User's Question: {user_query}
+
+Data Results:
+{result_text}
+
+Provide a conversational, natural language response that:
+1. Directly answers the user's question in 2-3 sentences
+2. Highlights key findings and specific numbers
+3. Mentions patterns or trends if visible
+4. Provides actionable insights if relevant
+5. Avoids technical jargon, bullet points, and emojis
+6. Sounds like you're talking to a business colleague
+
+Keep it concise and conversational."""
+        
+        model = genai.GenerativeModel("gemini-2.5-flash")
+        response = model.generate_content(prompt)
+        
+        if response and response.text:
+            insights = response.text.strip()
+            query_cache[cache_key] = insights
+            return insights
+        
+        return None
     
-    # try:
-    #     if not GEMINI_API_KEY:
-    #         return None
-    #     
-    #     # Check cache first
-    #     cache_key = _get_cache_key(f"insights:{user_query}", "insights")
-    #     if cache_key in query_cache:
-    #         return query_cache[cache_key]
-    #     
-    #     # Convert results to formatted string (limit to first 10 rows)
-    #     result_text = ""
-    #     for i, row in enumerate(query_result[:10]):
-    #         result_text += f"Row {i+1}: {row}\n"
-    #     
-    #     prompt = f"""You are a business analyst. Analyze the following data and provide insights.
-    # 
-    # Original Question: {user_query}
-    # 
-    # Data Results:
-    # {result_text}
-    # 
-    # Provide insights including:
-    # 1. Key trends or patterns
-    # 2. Highest and lowest values
-    # 3. Business recommendations
-    # 4. Notable observations
-    # 
-    # Keep the response concise and actionable."""
-    #     
-    #     model = genai.GenerativeModel("gemini-2.0-flash")
-    #     response = model.generate_content(prompt)
-    #     
-    #     if response and response.text:
-    #         insights = response.text.strip()
-    #         query_cache[cache_key] = insights
-    #         return insights
-    #     
-    #     return None
-    # 
-    # except Exception as e:
-    #     print(f"Error generating insights: {e}")
-    #     return None
-    
-    return None
+    except Exception as e:
+        print(f"Error generating insights: {e}")
+        return None
+
 
 def clear_cache():
     """Clear the query cache"""

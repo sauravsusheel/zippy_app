@@ -28,8 +28,8 @@
   font-weight: 600;
 }
 
-/* Natural Language Summary Section */
-.nlp-summary-section {
+/* AI Insights Section - Primary Response */
+.insights-section {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   border-radius: 12px;
   padding: 2rem;
@@ -38,13 +38,13 @@
   box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
 }
 
-.nlp-summary-section h3 {
+.insights-section h3 {
   color: white;
   margin-bottom: 1.5rem;
   font-size: 1.3rem;
 }
 
-.nlp-content {
+.insights-content {
   background: rgba(255, 255, 255, 0.1);
   border-left: 4px solid white;
   padding: 1.5rem;
@@ -53,29 +53,32 @@
   font-size: 1rem;
 }
 
-.nlp-content p {
+.insights-content p {
   color: white;
-  margin: 0.5rem 0;
-  white-space: pre-wrap;
-  word-wrap: break-word;
+  margin: 0;
+  line-height: 1.6;
 }
 
-.insights-section {
-  background: linear-gradient(135deg, #ffeaa7 0%, #fdcb6e 100%);
+/* Data Summary Section */
+.data-summary-section {
+  background: #f0f4ff;
   border-radius: 8px;
   padding: 1.5rem;
   margin-bottom: 2rem;
+  border-left: 4px solid #667eea;
 }
 
-.insights-section h3 {
-  color: #2d3436;
+.data-summary-section h3 {
+  color: #667eea;
   margin-bottom: 1rem;
+  font-size: 1.1rem;
 }
 
-.insights-content p {
+.summary-content p {
   color: #2d3436;
   line-height: 1.6;
-  margin: 0.5rem 0;
+  margin: 0;
+  font-size: 0.95rem;
 }
 
 .chart-card {

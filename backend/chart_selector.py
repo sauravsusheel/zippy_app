@@ -1,8 +1,8 @@
-def select_chart_type(data: list, columns: list) -> dict:
-    """Automatically select appropriate chart type based on data structure"""
+def select_chart_type(data: list, columns: list, user_query: str = "") -> dict:
+    """Automatically select appropriate chart type based on data structure and query intent"""
     
     if not data or not columns:
-        return {"type": "table", "reason": "No data available"}
+        return {"type": "none", "reason": "No data available"}
     
     num_columns = len(columns)
     num_rows = len(data)
@@ -12,7 +12,30 @@ def select_chart_type(data: list, columns: list) -> dict:
     has_numeric = any(isinstance(data[0].get(col), (int, float)) for col in columns if col in data[0])
     has_category = any(isinstance(data[0].get(col), str) for col in columns if col in data[0])
     
-    # Decision logic
+    # Check query intent
+    query_lower = user_query.lower()
+    
+    # Keywords that suggest user wants a chart/visualization
+    chart_keywords = ["show", "visualize", "chart", "graph", "trend", "compare", "distribution", 
+                      "breakdown", "analysis", "pattern", "growth", "decline", "performance", "by category", "by product"]
+    
+    # Keywords that suggest user wants just data/numbers (no chart)
+    no_chart_keywords = ["list", "get", "fetch", "retrieve", "tell me", "what are", "how many", 
+                         "count", "total", "sum", "average", "details", "show me"]
+    
+    # Check for explicit chart requests
+    wants_chart = any(keyword in query_lower for keyword in chart_keywords)
+    wants_data_only = any(keyword in query_lower for keyword in no_chart_keywords)
+    
+    # If user explicitly asks for data only, don't show chart
+    if wants_data_only and not wants_chart:
+        return {"type": "none", "reason": "User requested data summary only"}
+    
+    # If no numeric data, can't show meaningful chart
+    if not has_numeric:
+        return {"type": "none", "reason": "No numeric data for visualization"}
+    
+    # Decision logic for chart type
     if num_columns == 2 and has_date and has_numeric:
         return {
             "type": "line",
@@ -22,10 +45,10 @@ def select_chart_type(data: list, columns: list) -> dict:
         }
     
     elif num_columns == 2 and has_category and has_numeric:
-        if num_rows <= 10:
+        if num_rows <= 15:
             return {
                 "type": "bar",
-                "reason": "Categorical comparison with few categories",
+                "reason": "Categorical comparison",
                 "xAxis": columns[0],
                 "yAxis": columns[1]
             }
@@ -38,10 +61,10 @@ def select_chart_type(data: list, columns: list) -> dict:
             }
     
     elif num_columns == 2 and has_numeric:
-        if num_rows <= 6:
+        if num_rows <= 8:
             return {
                 "type": "pie",
-                "reason": "Distribution data with few categories",
+                "reason": "Distribution data",
                 "nameKey": columns[0],
                 "dataKey": columns[1]
             }
@@ -54,9 +77,8 @@ def select_chart_type(data: list, columns: list) -> dict:
             }
     
     elif num_columns >= 3:
-        # Multiple metrics - could use grouped bar or multiple charts
         numeric_cols = [col for col in columns if isinstance(data[0].get(col), (int, float))]
-        if len(numeric_cols) >= 2:
+        if len(numeric_cols) >= 2 and num_rows <= 20:
             return {
                 "type": "multibar",
                 "reason": "Multiple metrics comparison",
@@ -65,15 +87,14 @@ def select_chart_type(data: list, columns: list) -> dict:
             }
         else:
             return {
-                "type": "table",
-                "reason": "Complex data structure",
-                "columns": columns
+                "type": "none",
+                "reason": "Complex data structure - showing summary only"
             }
     
     else:
         return {
-            "type": "table",
-            "reason": "Default view for complex data",
+            "type": "none",
+            "reason": "Data summary view",
             "columns": columns
         }
 
@@ -82,11 +103,11 @@ def prepare_chart_data(data: list, chart_config: dict) -> dict:
     
     chart_type = chart_config.get("type")
     
-    if chart_type == "table":
+    if chart_type == "none":
         return {
-            "type": "table",
+            "type": "none",
             "data": data,
-            "columns": chart_config.get("columns", [])
+            "reason": chart_config.get("reason", "No chart needed")
         }
     
     elif chart_type in ["bar", "line"]:
@@ -113,4 +134,4 @@ def prepare_chart_data(data: list, chart_config: dict) -> dict:
             "yAxis": chart_config.get("yAxis")
         }
     
-    return {"type": "table", "data": data}
+    return {"type": "none", "data": data}

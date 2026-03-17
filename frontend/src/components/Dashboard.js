@@ -3,67 +3,44 @@ import './Dashboard.css';
 import ChartRenderer from './ChartRenderer';
 
 function Dashboard({ data }) {
-  const { sql, data: queryData, chart_config } = data;
+  const { sql, data: queryData, chart_config, insights } = data;
 
-  // Generate natural language summary from data
-  const generateNLPSummary = () => {
+  // Generate concise data summary
+  const generateDataSummary = () => {
     if (!queryData || queryData.length === 0) {
       return "No data found for your query.";
     }
 
-    let summary = "";
+    let summary = `Found ${queryData.length} record${queryData.length !== 1 ? 's' : ''}.`;
     
-    // Count records
-    summary += `Found ${queryData.length} record${queryData.length !== 1 ? 's' : ''}.\n\n`;
-
     // Get column names
     const columns = Object.keys(queryData[0]);
     
-    // Analyze numeric columns
+    // Analyze numeric columns for quick stats
     const numericColumns = columns.filter(col => {
       const firstVal = queryData[0][col];
       return typeof firstVal === 'number' || !isNaN(parseFloat(firstVal));
     });
 
-    // Generate summaries for numeric columns
+    // Add quick numeric summary
     if (numericColumns.length > 0) {
-      summary += "📊 Summary Statistics:\n";
-      
-      numericColumns.forEach(col => {
+      summary += " Key metrics: ";
+      const stats = numericColumns.slice(0, 2).map(col => {
         const values = queryData.map(row => parseFloat(row[col])).filter(v => !isNaN(v));
-        
         if (values.length > 0) {
           const sum = values.reduce((a, b) => a + b, 0);
           const avg = sum / values.length;
-          const max = Math.max(...values);
-          const min = Math.min(...values);
-          
-          summary += `\n• ${col}:\n`;
-          summary += `  - Total: ${sum.toFixed(2)}\n`;
-          summary += `  - Average: ${avg.toFixed(2)}\n`;
-          summary += `  - Maximum: ${max.toFixed(2)}\n`;
-          summary += `  - Minimum: ${min.toFixed(2)}\n`;
+          return `${col} (avg: ${avg.toFixed(2)})`;
         }
-      });
-    }
-
-    // Show top records
-    if (queryData.length > 0) {
-      summary += "\n📋 Top Records:\n";
-      queryData.slice(0, 5).forEach((row, idx) => {
-        summary += `\n${idx + 1}. `;
-        summary += Object.entries(row)
-          .map(([key, val]) => `${key}: ${val}`)
-          .join(", ");
-      });
-      
-      if (queryData.length > 5) {
-        summary += `\n\n... and ${queryData.length - 5} more records`;
-      }
+        return null;
+      }).filter(Boolean).join(", ");
+      summary += stats;
     }
 
     return summary;
   };
+
+  const shouldShowChart = chart_config && chart_config.type && chart_config.type !== "none";
 
   return (
     <div className="dashboard-container">
@@ -74,22 +51,30 @@ function Dashboard({ data }) {
         </div>
       </div>
 
-      {/* Chart Section - First */}
-      <div className="chart-card">
-        <div className="chart-section">
-          <ChartRenderer config={chart_config} data={queryData} />
+      {/* Chart Section - Only if needed */}
+      {shouldShowChart && (
+        <div className="chart-card">
+          <div className="chart-section">
+            <ChartRenderer config={chart_config} data={queryData} />
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* Natural Language Summary - Below Chart */}
-      <div className="nlp-summary-section">
-        <h3>📝 Natural Language Summary</h3>
-        <div className="nlp-content">
-          {generateNLPSummary().split('\n').map((line, idx) => (
-            <p key={idx} style={{ marginBottom: line.trim() === '' ? '10px' : '0' }}>
-              {line}
-            </p>
-          ))}
+      {/* AI-Generated Insights - Primary Response */}
+      {insights && (
+        <div className="insights-section">
+          <h3>💡 Analysis</h3>
+          <div className="insights-content">
+            <p>{insights}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Data Summary */}
+      <div className="data-summary-section">
+        <h3>📈 Data Summary</h3>
+        <div className="summary-content">
+          <p>{generateDataSummary()}</p>
         </div>
       </div>
 

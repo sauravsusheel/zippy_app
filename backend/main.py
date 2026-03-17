@@ -203,14 +203,26 @@ async def login(request: LoginRequest):
                 error="No registered users found."
             )
         
-        # Extract encodings
-        known_encodings = [user["face_encoding"] for user in users]
+        # Flatten all face encodings from all users
+        all_encodings = []
+        user_mapping = []  # Maps encoding index to user
+        
+        for user in users:
+            for encoding in user.get("face_encodings", []):
+                all_encodings.append(encoding)
+                user_mapping.append(user)
+        
+        if not all_encodings:
+            return AuthResponse(
+                success=False,
+                error="No face encodings found. Please register first."
+            )
         
         # Find best match
-        best_match_index, distance = find_best_match(test_encoding, known_encodings)
+        best_match_index, distance = find_best_match(test_encoding, all_encodings)
         
         if best_match_index is not None:
-            matched_user = users[best_match_index]
+            matched_user = user_mapping[best_match_index]
             
             # Generate JWT token
             token = generate_token(matched_user["id"], matched_user["employee_id"])
@@ -357,9 +369,24 @@ async def process_query(request: QueryRequest):
         # Use specified table or active dataset
         table_name = request.table_name or active_dataset["table_name"]
         
-        # Step 1: Get database schema
-        schema = get_schema()
+        # Step 1: Get database schema — build rich context for the LLM
         table_schema = get_table_schema(table_name)
+        
+        # Build a detailed schema string with column names, types, and sample values
+        if "columns" in table_schema:
+            col_lines = "\n".join(
+                f"  - {col['name']} ({col['type']})"
+                for col in table_schema["columns"]
+            )
+            sample_rows = table_schema.get("sample_rows", [])
+            sample_text = ""
+            if sample_rows:
+                sample_text = "\n\nSample rows:\n" + "\n".join(
+                    str(row) for row in sample_rows
+                )
+            schema = f"Table: {table_name}\nColumns:\n{col_lines}{sample_text}"
+        else:
+            schema = get_schema()
         
         # Step 2: Generate SQL using Gemini
         sql_result = generate_sql(user_query, schema, table_name)
@@ -386,7 +413,7 @@ async def process_query(request: QueryRequest):
         columns = query_result["columns"]
         
         # Step 4: Select appropriate chart type
-        chart_config = select_chart_type(data, columns)
+        chart_config = select_chart_type(data, columns, user_query)
         chart_data = prepare_chart_data(data, chart_config)
         
         # Step 5: Generate insights
