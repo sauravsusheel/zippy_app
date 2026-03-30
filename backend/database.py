@@ -206,8 +206,50 @@ def upload_dataset(file_path: str, table_name: str) -> Dict:
                 # If all encodings fail, try with errors='ignore'
                 df = pd.read_csv(file_path, encoding='utf-8', errors='ignore')
         
-        elif file_path.endswith('.xlsx'):
-            df = pd.read_excel(file_path)
+        elif file_path.endswith('.pdf'):
+            import pdfplumber
+            df = None
+            with pdfplumber.open(file_path) as pdf:
+                all_tables = []
+                for page in pdf.pages:
+                    tables = page.extract_tables()
+                    for table in tables:
+                        if table and len(table) > 1:
+                            all_tables.extend(table)
+                if all_tables:
+                    headers = all_tables[0]
+                    rows = all_tables[1:]
+                    # Clean None values
+                    headers = [str(h).strip() if h else f"col_{i}" for i, h in enumerate(headers)]
+                    df = pd.DataFrame(rows, columns=headers)
+                    df = df.dropna(how='all')
+            if df is None or df.empty:
+                return {"success": False, "error": "No tables found in PDF. Only PDFs with tabular data are supported."}
+            # Try engines in order of tolerance for malformed files
+            df = None
+            engines = ['openpyxl', 'xlrd'] if file_path.endswith('.xls') else ['openpyxl', 'calamine']
+            last_error = None
+            for engine in engines:
+                try:
+                    df = pd.read_excel(file_path, engine=engine)
+                    break
+                except Exception as e:
+                    last_error = e
+                    continue
+            if df is None:
+                # Last resort: try with openpyxl in read-only mode (skips invalid XML parts)
+                try:
+                    import openpyxl
+                    wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True, keep_vba=False)
+                    ws = wb.active
+                    data = list(ws.values)
+                    wb.close()
+                    if data:
+                        df = pd.DataFrame(data[1:], columns=data[0])
+                    else:
+                        return {"success": False, "error": "Excel file appears to be empty"}
+                except Exception:
+                    return {"success": False, "error": f"Could not read Excel file: {last_error}"}
         
         elif file_path.endswith('.json'):
             df = pd.read_json(file_path)

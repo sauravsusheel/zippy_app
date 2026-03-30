@@ -271,8 +271,8 @@ async def upload_dataset_endpoint(file: UploadFile = File(...)):
     """Upload a CSV or Excel file and create a table"""
     try:
         # Validate file type
-        if not file.filename.endswith(('.csv', '.xlsx', '.json')):
-            raise HTTPException(status_code=400, detail="Only CSV, XLSX, and JSON files are supported")
+        if not file.filename.endswith(('.csv', '.xlsx', '.xls', '.json', '.pdf')):
+            raise HTTPException(status_code=400, detail="Only CSV, XLSX, XLS, JSON and PDF files are supported")
         
         # Save uploaded file temporarily
         temp_path = f"temp_{file.filename}"
